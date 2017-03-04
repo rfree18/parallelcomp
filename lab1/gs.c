@@ -190,83 +190,74 @@ int main(int argc, char *argv[])
   MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
   MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
 
-  int *eq_count = malloc(comm_sz * sizeof(int));
-  int rem = num % comm_sz;
   int num_eq = num / comm_sz;
 
   int *proc_disp = malloc(comm_sz * sizeof(int));
   proc_disp[0] = 0;
 
-  for(i = 0; i < comm_sz; i++) {
-    if(i < rem) {
-      eq_count[i] = num_eq + 1;
-    } else {
-      eq_count[i] = num_eq;
-    }
+  // for(i = 0; i < comm_sz; i++) {
+  //   if(i < rem) {
+  //     eq_count[i] = num_eq + 1;
+  //   } else {
+  //     eq_count[i] = num_eq;
+  //   }
+  //
+  //   if(i != 0) {
+  //     proc_disp[i] = proc_disp[i-1] + eq_count[i-1];
+  //   }
+  // }
 
-    if(i != 0) {
-      proc_disp[i] = proc_disp[i-1] + eq_count[i-1];
-    }
-  }
+  // int local_size = eq_count[my_rank];
 
-  // int local_size = (int)ceil((double) num / comm_sz);
-  int local_size = eq_count[my_rank];
-
-  // float *local_a = malloc(num * local_size * sizeof(float));
-  float *local_b = malloc(local_size * sizeof(float));
-  float *local_x = malloc(local_size * sizeof(float));
+  float *local_b = malloc(num_eq * sizeof(float));
+  float *local_x = malloc(num_eq * sizeof(float));
   float *new_x = malloc(num * sizeof(float));
 
   for(i = 0; i < num; i++) {
     new_x[i] = x[i];
   }
 
-  int a_size = num * local_size;
-
-  // MPI_Scatter(a, a_size, MPI_FLOAT, local_a, a_size, MPI_FLOAT, 0, MPI_COMM_WORLD);
-  MPI_Scatterv(b, eq_count, proc_disp, MPI_FLOAT, local_b, local_size, MPI_FLOAT, 0, MPI_COMM_WORLD);
-  MPI_Scatterv(x, eq_count, proc_disp, MPI_FLOAT, local_x, local_size, MPI_FLOAT, 0, MPI_COMM_WORLD);
-
-
-  // Initial run
+  // Distribute b and x values to processes depending on assignments
+  // NOTE: a is not sent due to complications of double pointers
+  // MPI_Scatterv(b, eq_count, proc_disp, MPI_FLOAT, local_b, local_size, MPI_FLOAT, 0, MPI_COMM_WORLD);
+  // MPI_Scatterv(x, eq_count, proc_disp, MPI_FLOAT, local_x, local_size, MPI_FLOAT, 0, MPI_COMM_WORLD);
+  MPI_Scatter(b, num_eq, MPI_FLOAT, local_b, num_eq, MPI_FLOAT, 0, MPI_COMM_WORLD);
+  MPI_Scatter(x, num_eq, MPI_FLOAT, local_x, num_eq, MPI_FLOAT, 0, MPI_COMM_WORLD);
 
   int a_base = 0;
 
   for(i = 0; i < my_rank; i++) {
-    a_base += eq_count[i];
+    // Get starting point for needed a values
+    a_base += num_eq;
   }
 
   do {
     nit++;
+    // Save old values to check error
     for(i = 0; i < num; i++){
           x[i] = new_x[i];
       }
-    for(i = 0; i < eq_count[my_rank]; i++) {
+    for(i = 0; i < num_eq; i++) {
       int j;
-      int count = i;
-      int curr_a_index = a_base + i;
+      int start_index = a_base + i;
 
-      for(j = 0; j < my_rank; j++) {
-        count += eq_count[j];
-      }
-
-      local_x[curr_a_index] = local_b[i];
+      local_x[i] = local_b[i];
 
       for(j = 0; j < num; j++) {
-        if(j != curr_a_index) {
-          local_x[curr_a_index] = local_x[curr_a_index] - a[curr_a_index][j] * x[j];
+        if(j != start_index) {
+          local_x[i] = local_x[i] - a[start_index][j] * x[j];
         }
       }
-      local_x[curr_a_index] = local_x[curr_a_index] / a[curr_a_index][curr_a_index];
-      // for(j = 0; j < my_rank; j++) {
-      //   local_x += eq_count[j];
-      // }
+      local_x[i] = local_x[i] / a[start_index][start_index];
     }
 
-    float *send_buff = local_x + proc_disp[my_rank];
-    MPI_Allgatherv(send_buff, eq_count[my_rank], MPI_FLOAT, new_x, eq_count, proc_disp,
-      MPI_FLOAT, MPI_COMM_WORLD);
+    // Adjust start address to only send assigned values
+    // MPI_Allgatherv(local_x, eq_count[my_rank], MPI_FLOAT, new_x, eq_count, proc_disp,
+    //   MPI_FLOAT, MPI_COMM_WORLD);
+    MPI_Allgather(local_x, num_eq, MPI_FLOAT, new_x, num_eq, MPI_FLOAT, MPI_COMM_WORLD);
   } while(check_error(new_x, num));
+
+  // printf("Process: %d\n", my_rank);
 
   /* Writing to the stdout */
   /* Keep that same format */
@@ -275,9 +266,17 @@ int main(int argc, char *argv[])
     printf("%f\n",new_x[i]);
 
     printf("total number of iterations: %d\n", nit);
+    free(a);
+    free(b);
+    free(x);
   }
 
   MPI_Barrier(MPI_COMM_WORLD);
+  free(local_x);
+  free(local_b);
+  free(new_x);
+  free(proc_disp);
+
   MPI_Finalize();
 
   exit(0);
