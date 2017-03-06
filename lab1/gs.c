@@ -145,10 +145,8 @@ void get_input(char filename[])
 
 int is_above_error(float *new_val, int size) {
   int i;
-
   for(i = 0; i < size; i++) {
     float curr_error = fabs((new_val[i] - x[i]) / new_val[i]);
-
     if(curr_error > err) {
       // Error is greater than threshold
       return 1;
@@ -207,7 +205,6 @@ int main(int argc, char *argv[])
   MPI_Scatter(x, num_eq, MPI_FLOAT, local_x, num_eq, MPI_FLOAT, 0, MPI_COMM_WORLD);
 
   int a_base = 0;
-
   for(i = 0; i < my_rank; i++) {
     // Get starting point for needed a values
     a_base += num_eq;
@@ -221,10 +218,13 @@ int main(int argc, char *argv[])
       }
     for(i = 0; i < num_eq; i++) {
       int j;
+      // Get row of a since we cannot scatter a 2D array
       int start_index = a_base + i;
 
+      // Initialize value to b
       local_x[i] = local_b[i];
 
+      // Subtract substituted values, except for the value we want to find
       for(j = 0; j < num; j++) {
         if(j != start_index) {
           local_x[i] = local_x[i] - a[start_index][j] * x[j];
@@ -236,6 +236,7 @@ int main(int argc, char *argv[])
     MPI_Allgather(local_x, num_eq, MPI_FLOAT, new_x, num_eq, MPI_FLOAT, MPI_COMM_WORLD);
   } while(is_above_error(new_x, num));
 
+  // Probably not necessary, but just in case freeing causes issues
   MPI_Barrier(MPI_COMM_WORLD);
 
   /* Writing to the stdout */
@@ -247,6 +248,7 @@ int main(int argc, char *argv[])
     printf("total number of iterations: %d\n", nit);
   }
 
+  // Cleanup
   free(a);
   free(b);
   free(x);
