@@ -143,10 +143,10 @@ void get_input(char filename[])
 
 /************************************************************/
 
-int check_error(float *new_val, int size) {
-  int i = 0;
+int is_above_error(float *new_val, int size) {
+  int i;
 
-  for(i = 0; i < num; i++) {
+  for(i = 0; i < size; i++) {
     float curr_error = fabs((new_val[i] - x[i]) / new_val[i]);
 
     if(curr_error > err) {
@@ -183,31 +183,15 @@ int main(int argc, char *argv[])
   */
   check_matrix();
 
-  //Initialize MPI...
+  // Initialize MPI
   int comm_sz;
   int my_rank;
   MPI_Init(&argc, &argv);
   MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
   MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
 
+  // NOTE: This assumes the problem size is divisible by the number of processes
   int num_eq = num / comm_sz;
-
-  int *proc_disp = malloc(comm_sz * sizeof(int));
-  proc_disp[0] = 0;
-
-  // for(i = 0; i < comm_sz; i++) {
-  //   if(i < rem) {
-  //     eq_count[i] = num_eq + 1;
-  //   } else {
-  //     eq_count[i] = num_eq;
-  //   }
-  //
-  //   if(i != 0) {
-  //     proc_disp[i] = proc_disp[i-1] + eq_count[i-1];
-  //   }
-  // }
-
-  // int local_size = eq_count[my_rank];
 
   float *local_b = malloc(num_eq * sizeof(float));
   float *local_x = malloc(num_eq * sizeof(float));
@@ -219,8 +203,6 @@ int main(int argc, char *argv[])
 
   // Distribute b and x values to processes depending on assignments
   // NOTE: a is not sent due to complications of double pointers
-  // MPI_Scatterv(b, eq_count, proc_disp, MPI_FLOAT, local_b, local_size, MPI_FLOAT, 0, MPI_COMM_WORLD);
-  // MPI_Scatterv(x, eq_count, proc_disp, MPI_FLOAT, local_x, local_size, MPI_FLOAT, 0, MPI_COMM_WORLD);
   MPI_Scatter(b, num_eq, MPI_FLOAT, local_b, num_eq, MPI_FLOAT, 0, MPI_COMM_WORLD);
   MPI_Scatter(x, num_eq, MPI_FLOAT, local_x, num_eq, MPI_FLOAT, 0, MPI_COMM_WORLD);
 
@@ -251,13 +233,10 @@ int main(int argc, char *argv[])
       local_x[i] = local_x[i] / a[start_index][start_index];
     }
 
-    // Adjust start address to only send assigned values
-    // MPI_Allgatherv(local_x, eq_count[my_rank], MPI_FLOAT, new_x, eq_count, proc_disp,
-    //   MPI_FLOAT, MPI_COMM_WORLD);
     MPI_Allgather(local_x, num_eq, MPI_FLOAT, new_x, num_eq, MPI_FLOAT, MPI_COMM_WORLD);
-  } while(check_error(new_x, num));
+  } while(is_above_error(new_x, num));
 
-  // printf("Process: %d\n", my_rank);
+  MPI_Barrier(MPI_COMM_WORLD);
 
   /* Writing to the stdout */
   /* Keep that same format */
@@ -266,16 +245,14 @@ int main(int argc, char *argv[])
     printf("%f\n",new_x[i]);
 
     printf("total number of iterations: %d\n", nit);
-    free(a);
-    free(b);
-    free(x);
   }
 
-  MPI_Barrier(MPI_COMM_WORLD);
+  free(a);
+  free(b);
+  free(x);
   free(local_x);
   free(local_b);
   free(new_x);
-  free(proc_disp);
 
   MPI_Finalize();
 
